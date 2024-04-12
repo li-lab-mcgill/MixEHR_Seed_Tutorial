@@ -12,7 +12,7 @@ D, K = document_phecode_matrix.shape
 
 alpha_prior = np.zeros((document_phecode_matrix.shape)) # alpha is the D X K matrix as topic prior
 for k in range(K):
-    print(k)
+    # print(k)
     x = document_phecode_matrix[:, k ]
     check_sample = x[0]
     x = x.reshape(-1, 1)

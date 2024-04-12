@@ -12,12 +12,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 seeds_topic_matrix = torch.load("../phecode_mapping/seed_topic_matrix.pt", map_location=device) # get seed word-topic mapping, V x K matrix
 topic_prior_alpha = torch.load("../guide_prior/topic_prior_alpha.pt", map_location=device)  # get topic prior alpha, D X K matrix
 c = Corpus.read_corpus_from_directory('../store/', 'corpus.pkl') # read corpus file
-print(c.V)
+# print(c.V)
 
 exp_n_icd = torch.zeros(c.V[0], topic_prior_alpha.shape[1], dtype=torch.double, requires_grad=False, device=device)
 exp_s_icd = torch.zeros(c.V[0], topic_prior_alpha.shape[1], dtype=torch.double, requires_grad=False, device=device) # default guided modality is 0
 for d_i, doc in enumerate(c.dataset):
-    print(d_i)
+    # print(d_i)
     doc_id = doc.doc_id
     for word_id, freq in doc.words_dict[0].items(): # word_index v and freq
         # update seed words
@@ -32,7 +32,7 @@ exp_n_drg = torch.zeros(c.V[3], topic_prior_alpha.shape[1], dtype=torch.double, 
 exp_n_lab = torch.zeros(c.V[4], topic_prior_alpha.shape[1], dtype=torch.double, requires_grad=False, device=device)
 exp_n_note = torch.zeros(c.V[5], topic_prior_alpha.shape[1], dtype=torch.double, requires_grad=False, device=device)
 for d_i, doc in enumerate(c.dataset):
-    print(d_i)
+    # print(d_i)
     doc_id = doc.doc_id
     for word_id, freq in doc.words_dict[1].items():
         exp_n_med[word_id] += topic_prior_alpha[d_i] * freq
