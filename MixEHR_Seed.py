@@ -149,9 +149,8 @@ class MixEHR_Seed(nn.Module):
                 + torch.sum(lgamma(seed_exp_s_k + self.mu)) + (seed_exp_s_k.sum() * torch.log(self.pi[k])) \
                 - lgamma(self.exp_s_sum[k] + self.mu_sum[k])
         loss = kl_z + torch.logsumexp(torch.stack([log_sum_n_terms, log_sum_s_terms]), dim=0)
-        print(log_sum_n_terms)
-        print("elbo: ", loss.detach().cpu().numpy().item(), " p_z: ", torch.sum(p_z),
-              " q_z: ", self.exp_q_z, "E_q[log p(w | z, beta, mu, pi)]: ", logsumexp([log_sum_n_terms, log_sum_s_terms]))
+        # print("elbo: ", loss.detach().cpu().numpy().item(), " p_z: ", torch.sum(p_z),
+        #       " q_z: ", self.exp_q_z, "E_q[log p(w | z, beta, mu, pi)]: ", logsumexp([log_sum_n_terms, log_sum_s_terms]))
         # print("took %s seconds for minibatch %s" % (time.time() - start_time, minibatch))
         # self.elbo.append(loss.detach().cpu().numpy().item())
         # print(self.elbo)
@@ -263,12 +262,12 @@ class MixEHR_Seed(nn.Module):
         total_elbo_hist = []
         for epoch in range(0, max_epoch):
             start_time = time.time()
-            print("Training for epoch", epoch)
+            print("Training for %d epoch" % epoch)
             elbo_hist = np.zeros((len(self.mini_batch_generator)))
             if self.stochastic_VI:
                 batch_n = (self.D // self.batch_size) + 1
                 for minibatch, d in enumerate(self.mini_batch_generator):  # For each epoach, we sample a series of mini_batch data once
-                    print("Running for %d minibatch", minibatch)
+                    print("Running for %d minibatch" % minibatch)
                     start_time = time.time()
                     batch_docs, batch_indices, batch_C = d  # batch_C is total number of ICD codes (only) in a minibatch for SCVB0
                     for m in range(self.modaltiy_num):

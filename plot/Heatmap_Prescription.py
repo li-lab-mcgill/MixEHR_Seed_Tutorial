@@ -45,5 +45,3 @@ def extract_drug_name(drug_string):
 update_med_name_list = [extract_drug_name(drug) for drug in top_med_name_list]
 plot_unguide_topics(filter_phi_r, update_med_name_list, phecode_list, topic_list)
 
-# seed_ind_list = [1]*27
-# plot_seed_topics(filter_phi_r, top_med_name_list, phecode_list, topic_list, seed_ind_list)

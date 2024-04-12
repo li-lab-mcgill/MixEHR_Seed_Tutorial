@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('corpus', help='Path to read corpus file', default='./store/')
 parser.add_argument('output', help='Directory to store model', default='./parameters/')
 parser.add_argument("-epoch", "--max_epoch", help="Maximum number of max_epochs", type=int, default=5)
-parser.add_argument("-batch_size", "--batch_size", help="Batch size of a minibatch", type=int, default=5000)
+parser.add_argument("-batch_size", "--batch_size", help="Batch size of a minibatch", type=int, default=1000)
 parser.add_argument("-every", "--save_every", help="Store model every X number of iterations", type=int, default=1)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # we use GPU, printed result is "cuda"
 print(device)
@@ -36,7 +36,7 @@ def run(args):
     # ''' % (args.corpus, args.output, args.max_epoch, args.batch_size, args.save_every))
     elbo = model.inference(max_epoch=args.max_epoch, save_every=args.save_every)
     # elbo = model.inference_SCVB_SGD(max_epoch=args.max_epoch, save_every=args.save_every)
-    print("epoch : %s" % (elbo))
+    # print("epoch : %s" % (elbo))
 
 if __name__ == '__main__':
     run(parser.parse_args(['./store/', './parameters/']))
