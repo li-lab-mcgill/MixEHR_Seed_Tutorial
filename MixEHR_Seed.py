@@ -57,7 +57,12 @@ class MixEHR_Seed(nn.Module):
         self.eta = 0.1
         self.init_priors = "./guide_prior/init_tokens/"
         self.initialize_tokens()
-        self.elbo_print = []
+        self.elbo = []
+        self.term1 = []
+        self.term2 = []
+        self.term3 = []
+        self.term4 = []
+
         # temporal inference component
         # self.eta = torch.rand(self.T, self.K, requires_grad=False, device=device)
         # self.alpha = self.alpha_softplus_act().to(device) # T x K
@@ -136,24 +141,36 @@ class MixEHR_Seed(nn.Module):
         kl_z = torch.sum(p_z) + constant_terms - self.exp_q_z
         # kl_z = torch.sum(p_z) - self.exp_q_z
         # E_q[log p(w | z, beta, mu, pi)]
+        # kl_z = torch.sum(p_z) - self.exp_q_z
         log_sum_n_terms = 0
         log_sum_s_terms = 0
+        c = 0
+        d = 0
         for k in range(self.K):
-            seed_exp_s_k = self.exp_s[torch.nonzero(self.exp_s[:, k]).squeeze(dim=1), k] # a S[k]-len vector
             log_sum_n_terms += lgamma(torch.tensor(self.beta_sum[0])) \
-                - self.V[0] * lgamma(torch.tensor(self.beta)) \
-                + torch.sum(lgamma(self.exp_n[0][:, k] + self.beta)) + (self.exp_n[0][:, k].sum() * torch.log(1-self.pi[k])) \
-                - lgamma(self.exp_n_sum[0][k] + self.beta_sum[0])
+                               - self.V[0] * lgamma(torch.tensor(self.beta)) \
+                               + torch.sum(lgamma(self.exp_n[0][:, k] + self.beta) + self.exp_n[0][:, k] * torch.log(1 - self.pi[k])) \
+                               - lgamma(self.exp_n_sum[0][k] + self.beta_sum[0])
+            seed_exp_s_k = self.exp_s[torch.nonzero(self.exp_s[:, k]).squeeze(dim=1), k]  # a S[k]-len vector
             log_sum_s_terms += lgamma(torch.tensor(self.mu_sum[k])) \
-                - self.S[k] * lgamma(torch.tensor(self.mu)) \
-                + torch.sum(lgamma(seed_exp_s_k + self.mu)) + (seed_exp_s_k.sum() * torch.log(self.pi[k])) \
-                - lgamma(self.exp_s_sum[k] + self.mu_sum[k])
+                               - self.S[k] * lgamma(torch.tensor(self.mu)) \
+                               + torch.sum(lgamma(seed_exp_s_k + self.mu) + seed_exp_s_k * torch.log(self.pi[k])) \
+                               - lgamma(self.exp_s_sum[k] + self.mu_sum[k])
+            c += torch.sum(lgamma(seed_exp_s_k + self.mu) + seed_exp_s_k * torch.log(self.pi[k]))
+            d += - lgamma(self.exp_s_sum[k] + self.mu_sum[k])
         loss = kl_z + torch.logsumexp(torch.stack([log_sum_n_terms, log_sum_s_terms]), dim=0)
-        # print("elbo: ", loss.detach().cpu().numpy().item(), " p_z: ", torch.sum(p_z),
-        #       " q_z: ", self.exp_q_z, "E_q[log p(w | z, beta, mu, pi)]: ", logsumexp([log_sum_n_terms, log_sum_s_terms]))
+        print("elbo: ", loss.detach().cpu().numpy().item(),
+              "p_z: ", (torch.sum(p_z) +constant_terms).detach().cpu().numpy().item(),
+              "q_z: ", self.exp_q_z.detach().cpu().numpy().item(),
+              "E_q[log p(w | z, beta, mu, pi)]: ", logsumexp([log_sum_n_terms, log_sum_s_terms]).detach().cpu().numpy().item(),
+              )
         # print("took %s seconds for minibatch %s" % (time.time() - start_time, minibatch))
-        # self.elbo.append(loss.detach().cpu().numpy().item())
-        # print(self.elbo)
+        self.elbo.append(loss.detach().cpu().numpy().item())
+        self.term1.append((torch.sum(p_z) +constant_terms).detach().cpu().numpy().item())
+        self.term2.append(self.exp_q_z.detach().cpu().numpy().item())
+        self.term3.append(torch.logsumexp(torch.stack([log_sum_n_terms, log_sum_s_terms]), dim=0).detach().cpu().numpy().item())
+        self.term4.append([log_sum_s_terms.detach().cpu().numpy().item(),
+                           self.exp_s_sum.sum().detach().cpu().numpy().item(),])
         return loss.detach().cpu().numpy().item()
 
     def SCVB0_guided(self, batch_BOW, batch_indices, batch_C, iter_n, guided_m=0):
@@ -161,7 +178,10 @@ class MixEHR_Seed(nn.Module):
         temp_exp_m_batch = torch.zeros(batch_BOW.shape[0], self.K, dtype=torch.double, device=device)
         temp_exp_n = torch.zeros(self.V[guided_m], self.K, dtype=torch.double, device=device)
         temp_exp_s = torch.zeros(self.V[guided_m], self.K, dtype=torch.double, device=device)
+        gamma_ss_sum = torch.zeros(self.K, device=device)
         gamma_sr_sum = torch.zeros(self.K, device=device)
+        topic_occurrences = torch.matmul(batch_BOW.sum(0).float(), self.seeds_topic_matrix.float())
+        topic_presence = (topic_occurrences > 0.0).int()  # Convert to 0 or 1, and use int type
         # M step
         for d_i, doc_id in enumerate(batch_indices):
             temp_gamma_ss = torch.zeros(self.V[guided_m], self.K, dtype=torch.double, device=device) #  V x K  # non-seed regular word will be zero
@@ -196,11 +216,12 @@ class MixEHR_Seed(nn.Module):
             temp_exp_m_batch[d_i] += torch.sum(temp_gamma * batch_BOW[d_i, BOW_nonzero].unsqueeze(1), dim=0)
             temp_exp_n += (temp_gamma_sr + temp_gamma_rr) * batch_BOW[d_i].unsqueeze(1)
             temp_exp_s += temp_gamma_ss * batch_BOW[d_i].unsqueeze(1)
+            gamma_ss_sum += temp_gamma_ss.sum(0)
             gamma_sr_sum += temp_gamma_sr.sum(0)
             self.exp_q_z += torch.sum(temp_gamma * torch.log(temp_gamma+mini_val)) # used for update ELBO
         # E step
         # update expected terms
-        rho = 1 / math.pow((iter_n + 5), 0.9)
+        rho = 1 / math.pow((iter_n + 18), 1)
         if self.stochastic_VI:
             self.exp_m[batch_indices] = (1 - rho) * self.exp_m[batch_indices] + rho * temp_exp_m_batch
             self.exp_m_sum = torch.sum(self.exp_m, dim=1)  # sum over k, exp_m is [D K] dimensionality
@@ -208,7 +229,7 @@ class MixEHR_Seed(nn.Module):
             self.exp_s_sum = torch.sum(self.exp_s, dim=0)  # sum over w, exp_p is [V K] dimensionality
             self.exp_n[guided_m] = (1 - rho) * self.exp_n[guided_m] + rho * temp_exp_n * self.C[guided_m] / batch_C
             self.exp_n_sum[guided_m] = torch.sum(self.exp_n[guided_m], dim=0)  # sum over w, exp_n is [V K] dimensionality
-            # self.update_hyperparams(gamma_sr_sum)  # update hyperparameters
+            self.update_hyperparams(gamma_sr_sum, gamma_sr_sum, topic_presence)  # update hyperparameters
         else:
             self.exp_m[batch_indices] = temp_exp_m_batch
             self.exp_m_sum = torch.sum(self.exp_m, dim=1)  # sum over k, exp_m is [D K] dimensionality
@@ -216,7 +237,7 @@ class MixEHR_Seed(nn.Module):
             self.exp_s_sum = torch.sum(self.exp_s, dim=0)  # sum over w, exp_p is [V K] dimensionality
             self.exp_n[guided_m] = temp_exp_n
             self.exp_n_sum[guided_m] = torch.sum(self.exp_n[guided_m], dim=0)  # sum over w, exp_n is [V K] dimensionality
-            # self.update_hyperparams(gamma_sr_sum)  # update hyperparameters
+            self.update_hyperparams(gamma_ss_sum, gamma_sr_sum, topic_presence)  # update hyperparameters
 
 
     def SCVB0_unguided(self, batch_BOW, batch_indices, batch_C, iter_n, unguided_m):
@@ -245,16 +266,20 @@ class MixEHR_Seed(nn.Module):
             self.exp_n_sum[unguided_m] = torch.sum(self.exp_n[unguided_m], dim=0) # sum over w, exp_n is [V K] dimensionality
 
 
-    def update_hyperparams(self, gamma_sr_sum):
+    def update_hyperparams(self, gamma_ss_sum, gamma_sr_sum, topic_presence):
         '''
         update hyperparameters pi using Bernoulli trial
         '''
-        self.pi = self.exp_s_sum / (self.exp_s_sum + gamma_sr_sum + mini_val)
-        # fill pi_init for pi_k with non-computed topic k (as gamma is 0) or very low value
-        self.pi = torch.where(self.pi > 0.1, self.pi, torch.ones(self.K, dtype=torch.double, device=device)*self.pi_init)
+        # update all pi
+        # self.pi = self.exp_s_sum / (self.exp_s_sum + gamma_sr_sum + mini_val)
+
+        # only update pi with topic presence
+        potential_update = gamma_ss_sum / (gamma_ss_sum + gamma_sr_sum + mini_val)
+        potential_update = potential_update.double()
+        self.pi[topic_presence.bool()] = potential_update[topic_presence.bool()] - mini_val
 
 
-    def inference(self, max_epoch=5, save_every=1):
+    def inference(self, max_epoch=5):
         '''
         inference algorithm for dynamic seed-guided topic model, apply stochastic collaposed variational inference for latent variable z,
         and apply stochastic gradient descent for dynamic variables \eta (\alpha)
@@ -281,14 +306,37 @@ class MixEHR_Seed(nn.Module):
                         if m == self.guided_modality:
                             self.exp_q_z = 0  # update to zero for next minibatch
                             self.SCVB0_guided(batch_BOW_m, batch_indices, batch_C_m, epoch * batch_n + minibatch, guided_m=0)
+
+                            # get per-iteration elbo
                             elbo = self.get_elbo(batch_indices, batch_C_m, minibatch, epoch, start_time)
-                            # elbo_hist[minibatch] = elbo
-                            total_elbo_hist.append(elbo)
+                            elbo_hist[minibatch] = elbo
+                            if minibatch == batch_n-1: # take per-epoch elbo after all minibatch
+                                total_elbo_hist.append(np.mean(elbo_hist))
+                                self.elbo.pop()
+
+                            # only compute per-epoch elbo
+                            # if minibatch == batch_n-1:
+                            #     elbo = self.get_elbo(batch_indices, batch_C_m, minibatch, epoch, start_time)
+                            #     total_elbo_hist.append(elbo)
+                            #     print('elbo: ', self.elbo)
+                            #     print('pz: ', self.term1)
+                            #     print('qz: ', self.term2)
+                            #     print('pw: ', self.term3)
                         else:
                             self.SCVB0_unguided(batch_BOW_m, batch_indices, batch_C_m, epoch * batch_n + minibatch, unguided_m=m)
+                # for batch, d in enumerate(self.full_batch_generator):  # For each epoch, use full batch of data to compute elbo
+                #     print("Compute ELBO for %d epoch" % epoch)
+                #     batch_docs, batch_indices, batch_C = d  # batch_C is total number of ICD codes (only) in a minibatch for SCVB0
+                #     for m in range(self.modaltiy_num):
+                #         if m == self.guided_modality:
+                #             batch_C_m = sum([doc_C[m] for doc_C in batch_C])
+                #             elbo = self.get_elbo(batch_indices, batch_C_m, batch, epoch, start_time)
+                #             total_elbo_hist.append(elbo)
+                #         else:
+                #             pass
             else:
                 for batch, d in enumerate(self.full_batch_generator):  # For each epoch, use full batch of data
-                    print("Running for %d fullbatch")
+                    print("Running for %d fullbatch" % epoch)
                     batch_docs, batch_indices, batch_C = d  # batch_C is total number of ICD codes (only) in a minibatch for SCVB0
                     for m in range(self.modaltiy_num):
                         # modaltiy specific BOW matrix, shape is D X V[m]
@@ -300,11 +348,12 @@ class MixEHR_Seed(nn.Module):
                                 batch_BOW_m[d_i, word_id] = freq
                         if m == self.guided_modality:
                             self.SCVB0_guided(batch_BOW_m, batch_indices, batch_C_m, batch, guided_m=0)
-                            self.get_elbo(batch_indices, batch_C_m, batch, epoch, start_time)
+                            elbo = self.get_elbo(batch_indices, batch_C_m, batch, epoch, start_time)
+                            total_elbo_hist.append(elbo)
                         else:
                             self.SCVB0_unguided(batch_BOW_m, batch_indices, batch_C_m, batch, unguided_m=m)
             self.save_parameters(epoch)
-            # total_elbo_hist.append(np.mean(elbo_hist))
+
         return total_elbo_hist
 
     def save_parameters(self, epoch):
